@@ -25,7 +25,7 @@
 #include "db_upgrades.h"
 #define DBVERSION 8
 
-static struct pkgdb_it * pkgdb_it_new(struct pkgdb *, sqlite3_stmt *, int);
+static struct pkgdb_it * pkgdb_it_new(struct pkgdb *, sqlite3_stmt *, int, struct failedpkgs *);
 static void pkgdb_regex(sqlite3_context *, int, sqlite3_value **, int);
 static void pkgdb_regex_basic(sqlite3_context *, int, sqlite3_value **);
 static void pkgdb_regex_extended(sqlite3_context *, int, sqlite3_value **);
@@ -595,7 +595,7 @@ pkgdb_close(struct pkgdb *db)
 }
 
 static struct pkgdb_it *
-pkgdb_it_new(struct pkgdb *db, sqlite3_stmt *s, int type)
+pkgdb_it_new(struct pkgdb *db, sqlite3_stmt *s, int type, struct failedpkgs *fp)
 {
 	struct pkgdb_it *it;
 
@@ -610,6 +610,7 @@ pkgdb_it_new(struct pkgdb *db, sqlite3_stmt *s, int type)
 	it->db = db;
 	it->stmt = s;
 	it->type = type;
+	it->failedpkgs = fp;
 	return (it);
 }
 
@@ -696,6 +697,17 @@ pkgdb_it_free(struct pkgdb_it *it)
 			"DROP TABLE IF EXISTS delete_job; "
 			"DROP TABLE IF EXISTS pkgjobs");
 	}
+	
+	// Free the failedpkgs list
+	if (it->failedpkgs != NULL) {
+		while (!SLIST_EMPTY(it->failedpkgs)) {
+			struct failpkg *entry;
+			entry = SLIST_FIRST(it->failedpkgs);
+			SLIST_REMOVE_HEAD(it->failedpkgs, next);
+			free(entry);
+		}
+		free(it->failedpkgs);
+	}
 
 	sqlite3_finalize(it->stmt);
 	free(it);
@@ -764,7 +776,7 @@ pkgdb_query(struct pkgdb *db, const char *pattern, match_t match)
 	if (match != MATCH_ALL)
 		sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
 
-	return (pkgdb_it_new(db, stmt, PKG_INSTALLED));
+	return (pkgdb_it_new(db, stmt, PKG_INSTALLED, NULL));
 }
 
 struct pkgdb_it *
@@ -788,7 +800,7 @@ pkgdb_query_which(struct pkgdb *db, const char *path)
 
 	sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 
-	return (pkgdb_it_new(db, stmt, PKG_INSTALLED));
+	return (pkgdb_it_new(db, stmt, PKG_INSTALLED, NULL));
 }
 
 int
@@ -2057,7 +2069,7 @@ pkgdb_query_installs(struct pkgdb *db, match_t match, int nbpkgs, char **pkgs, c
 	sbuf_finish(sql);
 	sbuf_delete(sql);
 
-	return (pkgdb_it_new(db, stmt, PKG_REMOTE));
+	return (pkgdb_it_new(db, stmt, PKG_REMOTE, NULL));
 }
 
 struct pkgdb_it *
@@ -2156,7 +2168,7 @@ pkgdb_query_upgrades(struct pkgdb *db, const char *repo)
 	sbuf_finish(sql);
 	sbuf_delete(sql);
 
-	return (pkgdb_it_new(db, stmt, PKG_REMOTE));
+	return (pkgdb_it_new(db, stmt, PKG_REMOTE, NULL));
 }
 
 struct pkgdb_it *
@@ -2212,7 +2224,7 @@ pkgdb_query_downgrades(struct pkgdb *db, const char *repo)
 		return (NULL);
 	}
 
-	return (pkgdb_it_new(db, stmt, PKG_REMOTE));
+	return (pkgdb_it_new(db, stmt, PKG_REMOTE, NULL));
 }
 
 struct pkgdb_it *
@@ -2245,7 +2257,7 @@ pkgdb_query_autoremove(struct pkgdb *db)
 		return (NULL);
 	}
 
-	return (pkgdb_it_new(db, stmt, PKG_INSTALLED));
+	return (pkgdb_it_new(db, stmt, PKG_INSTALLED, NULL));
 }
 
 struct pkgdb_it *
@@ -2254,6 +2266,7 @@ pkgdb_query_delete(struct pkgdb *db, match_t match, int nbpkgs, char **pkgs, int
 	sqlite3_stmt *stmt = NULL;
 
 	struct sbuf *sql = sbuf_new_auto();
+	struct failedpkgs *failedpkgs1 = NULL;
 	const char *how = NULL;
 	int i = 0;
 
@@ -2292,6 +2305,9 @@ pkgdb_query_delete(struct pkgdb *db, match_t match, int nbpkgs, char **pkgs, int
 			);
 
 	if (how != NULL) {
+		failedpkgs1 = malloc(sizeof(struct failedpkgs));
+		SLIST_INIT(failedpkgs1);
+		
 		sbuf_cat(sql, " WHERE ");
 		sbuf_printf(sql, how, "p.name");
 		sbuf_cat(sql, " OR ");
@@ -2301,12 +2317,24 @@ pkgdb_query_delete(struct pkgdb *db, match_t match, int nbpkgs, char **pkgs, int
 		sbuf_finish(sql);
 
 		for (i = 0; i < nbpkgs; i++) {
+			int rowsinserted = 0, ret = 0;
+			
 			if (sqlite3_prepare_v2(db->sqlite, sbuf_get(sql), -1, &stmt, NULL) != SQLITE_OK) {
 				ERROR_SQLITE(db->sqlite);
 				return (NULL);
 			}
 			sqlite3_bind_text(stmt, 1, pkgs[i], -1, SQLITE_STATIC);
-			while (sqlite3_step(stmt) != SQLITE_DONE);
+
+			while ((ret = sqlite3_step(stmt)) != SQLITE_DONE) {
+				if (ret == SQLITE_ROW)
+					rowsinserted++;
+			}
+			
+			if (rowsinserted == 0) {
+				struct failpkg *failedpkg = malloc(sizeof(struct failpkg));
+				failedpkg->name = pkgs[i];
+				SLIST_INSERT_HEAD(failedpkgs1, failedpkg, next);
+			}
 		}
 	} else {
 		sbuf_finish(sql);
@@ -2336,7 +2364,7 @@ pkgdb_query_delete(struct pkgdb *db, match_t match, int nbpkgs, char **pkgs, int
 	sbuf_finish(sql);
 	sbuf_delete(sql);
 
-	return (pkgdb_it_new(db, stmt, PKG_INSTALLED));
+	return (pkgdb_it_new(db, stmt, PKG_INSTALLED, failedpkgs1));
 }
 
 static int
@@ -2465,7 +2493,7 @@ pkgdb_rquery(struct pkgdb *db, const char *pattern, match_t match, unsigned int 
 
 	sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
 
-	return (pkgdb_it_new(db, stmt, PKG_REMOTE));
+	return (pkgdb_it_new(db, stmt, PKG_REMOTE, NULL));
 }
 
 int
@@ -2629,6 +2657,6 @@ pkgdb_integrity_conflict_local(struct pkgdb *db, const char *origin)
 
        sqlite3_bind_text(stmt, 1, origin, -1, SQLITE_TRANSIENT);
 
-       return (pkgdb_it_new(db, stmt, PKG_INSTALLED));
+       return (pkgdb_it_new(db, stmt, PKG_INSTALLED, NULL));
 }
 

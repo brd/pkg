@@ -11,10 +11,17 @@ struct pkgdb {
 	unsigned int writable :1;
 };
 
+struct failpkg {
+	char *name;
+	SLIST_ENTRY(failpkg) next;
+};
+SLIST_HEAD(failedpkgs, failpkg);
+
 struct pkgdb_it {
 	struct pkgdb *db;
 	sqlite3_stmt *stmt;
 	int type;
+	struct failedpkgs *failedpkgs;
 };
 
 #endif

@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <sys/queue.h>
 
 #include <err.h>
 #include <stdio.h>
@@ -102,7 +103,12 @@ exec_delete(int argc, char **argv)
 
 	/* check if we have something to deinstall */
 	if (pkg_jobs_is_empty(jobs)) {
-		printf("Nothing to do\n");
+		struct failpkg *fp;
+		printf("The following packages where not found");
+		SLIST_FOREACH(fp, it->failedpkgs, next) {
+			printf("%s", fp->name);
+		}
+
 		retcode = 0;
 		goto cleanup;
 	}
