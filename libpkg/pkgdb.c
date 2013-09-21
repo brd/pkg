@@ -71,7 +71,7 @@
 */
 
 #define DB_SCHEMA_MAJOR	0
-#define DB_SCHEMA_MINOR	19
+#define DB_SCHEMA_MINOR	20
 
 #define DBVERSION (DB_SCHEMA_MAJOR * 1000 + DB_SCHEMA_MINOR)
 
@@ -86,6 +86,8 @@ static int sqlcmd_init(sqlite3 *db, __unused const char **err,
 static int prstmt_initialize(struct pkgdb *db);
 /* static int run_prstmt(sql_prstmt_index s, ...); */
 static void prstmt_finalize(struct pkgdb *db);
+static int pkgdb_insert_scripts(struct pkg *pkg, int64_t package_id, sqlite3 *s);
+
 
 extern int sqlite3_shell(int, char**);
 
@@ -483,15 +485,20 @@ pkgdb_init(sqlite3 *sdb)
 	");"
 	"CREATE TABLE mtree ("
 		"id INTEGER PRIMARY KEY,"
-		"content TEXT UNIQUE"
+		"content TEXT NOT NULL UNIQUE"
 	");"
-	"CREATE TABLE scripts ("
+	"CREATE TABLE pkg_script ("
 		"package_id INTEGER REFERENCES packages(id) ON DELETE CASCADE"
 			" ON UPDATE CASCADE,"
-		"script TEXT,"
 		"type INTEGER,"
+		"script_id INTEGER REFERENCES script(script_id)"
+                        " ON DELETE RESTRICT ON UPDATE CASCADE,"
 		"PRIMARY KEY (package_id, type)"
 	");"
+        "CREATE TABLE script ("
+                "script_id INTEGER PRIMARY KEY,"
+                "script TEXT NOT NULL UNIQUE"
+        ");"
 	"CREATE TABLE options ("
 		"package_id INTEGER REFERENCES packages(id) ON DELETE CASCADE"
 			" ON UPDATE CASCADE,"
@@ -604,7 +611,7 @@ pkgdb_init(sqlite3 *sdb)
 	/* Mark the end of the array */
 
 	"CREATE INDEX deporigini on deps(origin);"
-	"CREATE INDEX scripts_package_id ON scripts (package_id);"
+	"CREATE INDEX pkg_script_package_id ON pkg_script(package_id);"
 	"CREATE INDEX options_package_id ON options (package_id);"
 	"CREATE INDEX deps_package_id ON deps (package_id);"
 	"CREATE INDEX files_package_id ON files (package_id);"
@@ -643,6 +650,41 @@ pkgdb_init(sqlite3 *sdb)
 		"AND package_id = old.package_id; "
 	"END;"
 
+	"CREATE VIEW scripts AS SELECT package_id, script, type"
+                " FROM pkg_script ps JOIN script s"
+                " ON (ps.script_id = s.script_id);"
+        "CREATE TRIGGER scripts_update"
+                " INSTEAD OF UPDATE ON scripts "
+        "FOR EACH ROW BEGIN"
+                " INSERT OR IGNORE INTO script(script)"
+                " VALUES(new.script);"
+	        " UPDATE pkg_script"
+                " SET package_id = new.package_id,"
+                        " type = new.type,"
+	                " script_id = ( SELECT script_id"
+	                " FROM script WHERE script = new.script )"
+                " WHERE package_id = old.package_id"
+                        " AND type = old.type;"
+        "END;"
+        "CREATE TRIGGER scripts_insert"
+                " INSTEAD OR INSERT ON scripts "
+        "FOR EACH ROW BEGIN"
+                " INSERT OR IGNORE INTO script(script)"
+                " VALUES(new.script);"
+	        " INSERT INTO pkg_script(package_id, type, script_id) "
+	        " SELECT new.package_id, new.type, s.script_id"
+                " FROM script s WHERE new.script = s.script;"
+	"END;"
+	"CREATE TRIGGER scripts_delete"
+	        " INSTEAD OF DELETE ON scripts "
+        "FOR EACH ROW BEGIN"
+                " DELETE FROM pkg_script"
+                " WHERE package_id = old.package_id"
+                " AND type = old.type;"
+                " DELETE FROM script"
+                " WHERE script_id NOT IN"
+                         " (SELECT DISTINCT script_id FROM pkg_script);"
+	"END;"
 
 	"PRAGMA user_version = %d;"
 	"COMMIT;"
@@ -1954,7 +1996,7 @@ pkgdb_load_scripts(struct pkgdb *db, struct pkg *pkg)
 	int		 ret;
 	const char	 sql[] = ""
 		"SELECT script, type "
-		"FROM scripts "
+		"FROM pkg_script JOIN script USING(script_id) "
 		"WHERE package_id = ?1";
 
 	assert(db != NULL && pkg != NULL);
@@ -2045,7 +2087,8 @@ typedef enum _sql_prstmt_index {
 	USERS2,
 	GROUPS1,
 	GROUPS2,
-	SCRIPTS,
+	SCRIPT1,
+	SCRIPT2,
 	OPTIONS,
 	SHLIBS1,
 	SHLIBS_REQD,
@@ -2153,10 +2196,16 @@ static sql_prstmt sql_prepared_statements[PRSTMT_LAST] = {
 		"VALUES (?1, (SELECT id FROM groups WHERE name = ?2))",
 		"IT",
 	},
-	[SCRIPTS] = {
+	[SCRIPT1] = {
 		NULL,
-		"INSERT INTO scripts (script, type, package_id) "
-		"VALUES (?1, ?2, ?3)",
+		"INSERT OR IGNORE INTO script(script) VALUES (?1)",
+		"T",
+	},
+	[SCRIPT2] = {
+		NULL,
+		"INSERT INTO pkg_script(script_id, package_id, type) "
+		"VALUES ((SELECT script_id FROM script WHERE script = ?1), "
+		"?2, ?3)",
 		"TII",
 	},
 	[OPTIONS] = {
@@ -2328,7 +2377,6 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 	bool			 automatic;
 	lic_t			 licenselogic;
 	int64_t			 flatsize;
-	int64_t			 i;
 
 	assert(db != NULL);
 
@@ -2548,8 +2596,7 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 		    != SQLITE_DONE
 		    ||
 		    run_prstmt(GROUPS2, package_id, pkg_group_name(group))
-		    != SQLITE_DONE)
-		{
+		    != SQLITE_DONE) {
 			ERROR_SQLITE(s);
 			goto cleanup;
 		}
@@ -2559,16 +2606,8 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 	 * Insert scripts
 	 */
 
-	for (i = 0; i < PKG_NUM_SCRIPTS; i++) {
-		if (pkg_script_get(pkg, i) == NULL)
-			continue;
-
-		if (run_prstmt(SCRIPTS, pkg_script_get(pkg, i),
-		    i, package_id) != SQLITE_DONE) {
-			ERROR_SQLITE(s);
-			goto cleanup;
-		}
-	}
+	if (pkgdb_insert_scripts(pkg, package_id, s) != EPKG_OK)
+		goto cleanup;
 
 	/*
 	 * Insert options
@@ -2602,6 +2641,29 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 
 	return (retcode);
 }
+
+static int
+pkgdb_insert_scripts(struct pkg *pkg, int64_t package_id, sqlite3 *s)
+{
+	const char	*script;
+	int64_t		 i;
+
+	for (i = 0; i < PKG_NUM_SCRIPTS; i++) {
+		script = pkg_script_get(pkg, i);
+
+		if (script == NULL)
+			continue;
+		if (run_prstmt(SCRIPT1, script) != SQLITE_DONE
+		    ||
+		    run_prstmt(SCRIPT2, script, package_id, i) != SQLITE_DONE) {
+			ERROR_SQLITE(s);
+			return (EPKG_FATAL);
+		}
+	}
+
+	return (EPKG_OK);
+}
+
 
 int
 pkgdb_update_shlibs_required(struct pkg *pkg, int64_t package_id, sqlite3 *s)
@@ -2908,6 +2970,8 @@ pkgdb_unregister_pkg(struct pkgdb *db, const char *origin)
 			"(SELECT DISTINCT shlib_id FROM pkg_shlibs_required)"
 			"AND id NOT IN "
 			"(SELECT DISTINCT shlib_id FROM pkg_shlibs_provided)",
+		"script WHERE script_id NOT IN "
+		        "(SELECT DISTINCT script_id FROM pkg_script)",
 	};
 	size_t		 num_deletions = 
 		sizeof(deletions) / sizeof(*deletions);
