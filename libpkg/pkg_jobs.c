@@ -850,6 +850,19 @@ jobs_solve_install(struct pkg_jobs *j)
 			}
 			pkgdb_it_free(it);
 		} else {
+			// Check if the pkg is locked before trying to install it
+			it = pkgdb_query(j->db, jp->pattern, jp->match);
+			if (it == NULL)
+				return (EPKG_FATAL);
+			pkg = NULL;
+			if (pkgdb_it_next(it, &pkg, PKG_LOAD_BASIC) == EPKG_OK) {
+				if (pkg_is_locked(pkg)) {
+					pkg_emit_locked(pkg);
+					printf("**** pkg locked! ****\n");
+					return (EPKG_LOCKED);
+				}
+			}
+			
 			if (get_remote_pkg(j, jp->pattern, jp->match,
 			    true) == EPKG_FATAL) {
 				ret = EPKG_FATAL;
