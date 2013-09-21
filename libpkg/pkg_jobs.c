@@ -858,11 +858,12 @@ jobs_solve_install(struct pkg_jobs *j)
 			if (pkgdb_it_next(it, &pkg, PKG_LOAD_BASIC) == EPKG_OK) {
 				if (pkg_is_locked(pkg)) {
 					pkg_emit_locked(pkg);
-					printf("**** pkg locked! ****\n");
+					pkgdb_it_free(it);
 					return (EPKG_LOCKED);
 				}
 			}
-			
+			pkgdb_it_free(it);
+
 			if (get_remote_pkg(j, jp->pattern, jp->match,
 			    true) == EPKG_FATAL) {
 				ret = EPKG_FATAL;
