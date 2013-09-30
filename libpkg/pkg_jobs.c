@@ -250,6 +250,12 @@ jobs_solve_deinstall(struct pkg_jobs *j)
 			return (EPKG_FATAL);
 
 		while (pkgdb_it_next(it, &pkg, PKG_LOAD_BASIC|PKG_LOAD_RDEPS) == EPKG_OK) {
+			// Check if the pkg is locked
+			if(pkg_is_locked(pkg)) {
+				pkg_emit_locked(pkg);
+				return(EPKG_FATAL);
+			}
+
 			pkg_get(pkg, PKG_ORIGIN, &origin, PKG_FLATSIZE, &oldsize);
 			pkg_set(pkg, PKG_OLD_FLATSIZE, oldsize, PKG_FLATSIZE, (int64_t)0);
 			HASH_ADD_KEYPTR(hh, j->bulk, origin, strlen(origin), pkg);
@@ -320,6 +326,14 @@ jobs_solve_autoremove(struct pkg_jobs *j)
 		return (EPKG_FATAL);
 
 	while (pkgdb_it_next(it, &pkg, PKG_LOAD_BASIC|PKG_LOAD_RDEPS) == EPKG_OK) {
+		// Check if the pkg is locked
+		// XXX: Need to test and verify this path
+		printf("jobs_solve_autoremove() lock check\n");
+		if(pkg_is_locked(pkg)) {
+			pkg_emit_locked(pkg);
+			return(EPKG_LOCKED);
+		}
+
 		pkg_get(pkg, PKG_ORIGIN, &origin);
 		HASH_ADD_KEYPTR(hh, j->bulk, origin, strlen(origin), pkg);
 		pkg = NULL;
@@ -355,6 +369,12 @@ jobs_solve_upgrade(struct pkg_jobs *j)
 		return (EPKG_FATAL);
 
 	while (pkgdb_it_next(it, &pkg, PKG_LOAD_BASIC) == EPKG_OK) {
+		// Check if the pkg is locked
+		if(pkg_is_locked(pkg)) {
+			pkg_emit_locked(pkg);
+			return(EPKG_LOCKED);
+		}
+
 		pkg_get(pkg, PKG_ORIGIN, &origin);
 		/* Do not test we ignore what doesn't exists remotely */
 		get_remote_pkg(j, origin, MATCH_EXACT, false);
@@ -827,6 +847,14 @@ jobs_solve_install(struct pkg_jobs *j)
 			pkg = NULL;
 			while (pkgdb_it_next(it, &pkg,
 			    PKG_LOAD_BASIC|PKG_LOAD_RDEPS) == EPKG_OK) {
+				// Check if the pkg is locked
+				// XXX: Need to test and verify this path
+				printf("jobs_solve_install() lock check\n");
+				if (pkg_is_locked(pkg)) {
+					pkg_emit_locked(pkg);
+					return (EPKG_LOCKED);
+				}
+
 				d = NULL;
 				pkg_get(pkg, PKG_ORIGIN, &origin);
 				if (get_remote_pkg(j, origin, MATCH_EXACT,
@@ -937,6 +965,14 @@ jobs_solve_fetch(struct pkg_jobs *j)
 			return (EPKG_FATAL);
 
 		while (pkgdb_it_next(it, &pkg, PKG_LOAD_BASIC) == EPKG_OK) {
+			// Check if the pkg is locked
+			// XXX: Need to test and verify this path
+			printf("jobs_solve_fetch() lock check\n");
+			if(pkg_is_locked(pkg)) {
+				pkg_emit_locked(pkg);
+				return(EPKG_LOCKED);
+			}
+
 			pkg_get(pkg, PKG_ORIGIN, &origin);
 			/* Do not test we ignore what doesn't exists remotely */
 			get_remote_pkg(j, origin, MATCH_EXACT, false);
