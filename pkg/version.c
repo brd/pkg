@@ -58,7 +58,7 @@ struct index_entry {
 void
 usage_version(void)
 {
-	fprintf(stderr, "usage: pkg version [-IPR] [-hoqvU] [-l limchar] [-L limchar] [-egix pattern]\n");
+	fprintf(stderr, "Usage: pkg version [-IPR] [-hoqvU] [-l limchar] [-L limchar] [-egix pattern]\n");
 	fprintf(stderr, "                   [-r reponame] [-O origin] [index]\n");
 	fprintf(stderr, "       pkg version -t <version1> <version2>\n");
 	fprintf(stderr, "       pkg version -T <pkgname> <pattern>\n\n");
@@ -384,7 +384,7 @@ exec_version(int argc, char **argv)
 				continue;
 
 			if (opt & VERSION_SOURCE_INDEX) {
-				HASH_FIND_STR(indexhead, __DECONST(char *, origin), entry);
+				HASH_FIND_STR(indexhead, origin, entry);
 				if (entry != NULL)
 					print_version(pkg, "index", entry->version, limchar, opt);
 			} else if (opt & VERSION_SOURCE_PORTS) {

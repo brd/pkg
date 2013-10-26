@@ -39,12 +39,12 @@
 #include <stringlist.h>
 #include <openssl/pem.h>
 
-/* The expected name of the pkg(1) binary executable. */
+/* The expected name of the pkg(8) binary executable. */
 #ifndef PKG_EXEC_NAME
 #define PKG_EXEC_NAME	"pkg"
 #endif
 
-/* The expected name of the pkg-static(1) binary */
+/* The expected name of the pkg-static(8) binary */
 #ifndef PKG_STATIC_NAME
 #define PKG_STATIC_NAME	"pkg-static"
 #endif
@@ -85,11 +85,11 @@ struct pkg_manifest_key;
 struct pkg_manifest_parser;
 
 /**
- * The system-wide pkg(1) status: ie. is it a) installed or otherwise
+ * The system-wide pkg(8) status: ie. is it a) installed or otherwise
  * available on the sysem, b) database (local.sqlite) initialised and
  * c) has at least one package installed (which should be pkg
  * itself). PKG_STATUS_UNINSTALLED logically cannot be returned by
- * pkg(1) itself, but it can be useful for the pkg bootstrapper
+ * pkg(8) itself, but it can be useful for the pkg bootstrapper
  * /usr/bin/pkg or for applications that link against libpkg.so
  */
 
@@ -785,6 +785,20 @@ int pkg_appendscript(struct pkg *pkg, const char *cmd, pkg_script type);
 int pkg_addoption(struct pkg *pkg, const char *name, const char *value);
 
 /**
+ * Add a default value to an already exsting struct pkg_option
+ * @return An error code.
+ */
+int pkg_addoption_default(struct pkg *pkg, const char *key,
+			  const char *default_value);
+
+/**
+ * Add a description to an already exsting struct pkg_option
+ * @return An error code.
+ */
+int pkg_addoption_description(struct pkg *pkg, const char *key,
+			      const char *description);
+
+/**
  * Add a shared library used by this package
  * @return An error code.
  */
@@ -813,11 +827,8 @@ int pkg_delannotation(struct pkg *pkg, const char *tag);
  * @param buf An NULL-terminated buffer containing the manifest data.
  * @return An error code.
  */
-int pkg_parse_manifest(struct pkg *pkg, char *buf, struct pkg_manifest_key *key);
-int pkg_parse_manifest_ev(struct pkg *pkg, char *buf, size_t len, struct pkg_manifest_parser *p);
-int pkg_parse_manifest_file(struct pkg *pkg, FILE *f, struct pkg_manifest_key *key);
-int pkg_parse_manifest_file_ev(struct pkg *pkg, FILE *f, struct pkg_manifest_parser *p);
-int pkg_load_manifest_file(struct pkg *pkg, const char *fpath, struct pkg_manifest_key *key);
+int pkg_parse_manifest(struct pkg *pkg, char *buf, size_t len, struct pkg_manifest_key *key);
+int pkg_parse_manifest_file(struct pkg *pkg, const char *, struct pkg_manifest_key *key);
 int pkg_manifest_keys_new(struct pkg_manifest_key **k);
 void pkg_manifest_keys_free(struct pkg_manifest_key *k);
 int pkg_manifest_parser_new(struct pkg_manifest_parser **p);
@@ -886,6 +897,8 @@ const char *pkg_script_get(struct pkg const * const, pkg_script);
 /* pkg_option */
 const char *pkg_option_opt(struct pkg_option const * const);
 const char *pkg_option_value(struct pkg_option const * const);
+const char *pkg_option_default_value(struct pkg_option const * const);
+const char *pkg_option_description(struct pkg_option const * const);
 
 /* pkg_shlib */
 const char *pkg_shlib_name(struct pkg_shlib const * const);
@@ -921,14 +934,17 @@ int pkg_is_installed(struct pkgdb *db, const char *origin);
 /**
  * Create a repository database.
  * @param path The path where the repository live.
+ * @param output_dir The path where the package repository should be created.
  * @param force If true, rebuild the repository catalogue from scratch
  * @param filesite If true, create a list of all files in repo
  * @param callback A function which is called at every step of the process.
  * @param data A pointer which is passed to the callback.
  * @param sum An 65 long char array to receive the sha256 sum
  */
-int pkg_create_repo(char *path, bool force, bool filelist, void (*callback)(struct pkg *, void *), void *);
-int pkg_finish_repo(char *path, pem_password_cb *cb, char *rsa_key_path, bool filelist);
+int pkg_create_repo(char *path, const char *output_dir, bool filelist,
+    void (*callback)(struct pkg *, void *), void *);
+int pkg_finish_repo(const char *output_dir, pem_password_cb *cb, char **argv,
+    int argc, bool filelist);
 
 /**
  * Test if the EUID has sufficient privilege to carry out some
@@ -1400,7 +1416,7 @@ int pkg_to_old(struct pkg *pkg);
 int pkg_register_old(struct pkg *pkg);
 int pkg_sshserve(void);
 
-int pkg_repos_count(void);
+int pkg_repos_count(bool);
 int pkg_repos(struct pkg_repo **);
 const char *pkg_repo_url(struct pkg_repo *r);
 const char *pkg_repo_ident(struct pkg_repo *r);

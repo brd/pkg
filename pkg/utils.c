@@ -160,7 +160,7 @@ absolutepath(const char *src, char *dest, size_t dest_size) {
 
 /* what the pkg needs to load in order to display the requested info */
 int
-info_flags(unsigned int opt, bool remote)
+info_flags(uint64_t opt, bool remote)
 {
 	int flags = PKG_LOAD_BASIC;
 
@@ -168,7 +168,7 @@ info_flags(unsigned int opt, bool remote)
 		flags |= PKG_LOAD_CATEGORIES;
 	if (opt & INFO_LICENSES)
 		flags |= PKG_LOAD_LICENSES;
-	if (opt & INFO_OPTIONS)
+	if (opt & (INFO_OPTIONS|INFO_OPTION_DEFAULTS|INFO_OPTION_DESCRIPTIONS))
 		flags |= PKG_LOAD_OPTIONS;
 	if (opt & INFO_SHLIBS_REQUIRED)
 		flags |= PKG_LOAD_SHLIBS_REQUIRED;
@@ -209,7 +209,7 @@ info_flags(unsigned int opt, bool remote)
 }
 
 void
-print_info(struct pkg * const pkg, unsigned int options)
+print_info(struct pkg * const pkg, uint64_t options)
 {
 	bool print_tag = false;
 	bool show_locks = false;
@@ -602,13 +602,13 @@ print_jobs_summary(struct pkg_jobs *jobs, const char *msg, ...)
 				switch (pkg_version_change(pkg)) {
 				case PKG_DOWNGRADE:
 					pkg_printf("\tDowngrading %n: %V -> %v", pkg, pkg, pkg);
-					if (pkg_repos_count() > 1)
+					if (pkg_repos_count(false) > 1)
 						pkg_printf(" [%N]", pkg);
 					printf("\n");
 					break;
 				case PKG_REINSTALL:
 					pkg_printf("\tReinstalling %n-%v", pkg, pkg);
-					if (pkg_repos_count() > 1)
+					if (pkg_repos_count(false) > 1)
 						pkg_printf(" [%N]", pkg);
 					if (why != NULL)
 						printf(" (%s)", why);
@@ -616,7 +616,7 @@ print_jobs_summary(struct pkg_jobs *jobs, const char *msg, ...)
 					break;
 				case PKG_UPGRADE:
 					pkg_printf("\tUpgrading %n: %V -> %v", pkg, pkg, pkg);
-					if (pkg_repos_count() > 1)
+					if (pkg_repos_count(false) > 1)
 						pkg_printf(" [%N]", pkg);
 					printf("\n");
 					break;
@@ -627,7 +627,7 @@ print_jobs_summary(struct pkg_jobs *jobs, const char *msg, ...)
 				newsize += flatsize;
 
 				pkg_printf("\tInstalling %n: %v", pkg, pkg);
-				if (pkg_repos_count() > 1)
+				if (pkg_repos_count(false) > 1)
 					pkg_printf(" [%N]", pkg);
 				printf("\n");
 			}
@@ -686,7 +686,7 @@ print_jobs_summary(struct pkg_jobs *jobs, const char *msg, ...)
 			break;
 		case PKG_JOBS_DEINSTALL:
 		case PKG_JOBS_AUTOREMOVE:
-			printf("\nThe deinstallation will require %s more space\n", size);
+			printf("\nThe deinstallation will free %s\n", size);
 			break;
 		case PKG_JOBS_FETCH:
 			/* nothing to report here */
