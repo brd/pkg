@@ -986,10 +986,10 @@ jobs_solve_fetch(struct pkg_jobs *j)
 
 		while (pkgdb_it_next(it, &pkg, PKG_LOAD_BASIC) == EPKG_OK) {
 			// Check if the pkg is locked
-			// XXX: Need to test and verify this path
 			printf("jobs_solve_fetch() lock check\n");
 			if(pkg_is_locked(pkg)) {
 				pkg_emit_locked(pkg);
+				pkgdb_it_free(it);
 				return(EPKG_LOCKED);
 			}
 
