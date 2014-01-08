@@ -64,7 +64,7 @@ exec_add(int argc, char **argv)
 {
 	struct pkgdb *db = NULL;
 	struct sbuf *failedpkgs = NULL;
-	char path[MAXPATHLEN + 1];
+	char path[MAXPATHLEN];
 	char *file;
 	int retcode;
 	int ch;
@@ -117,7 +117,8 @@ exec_add(int argc, char **argv)
 	pkg_manifest_keys_new(&keys);
 	for (i = 0; i < argc; i++) {
 		if (is_url(argv[i]) == EPKG_OK) {
-			snprintf(path, sizeof(path), "./%s", basename(argv[i]));
+			snprintf(path, sizeof(path), "%s/%s.XXXXX",
+			    getenv("TMPDIR") != NULL ? getenv("TMPDIR") : "/tmp", basename(argv[i]));
 			if ((retcode = pkg_fetch_file(NULL, argv[i], path, 0)) != EPKG_OK)
 				break;
 
@@ -150,6 +151,9 @@ exec_add(int argc, char **argv)
 				sbuf_printf(failedpkgs, ", ");
 			failedpkgcount++;
 		}
+
+		if (is_url(argv[i]) == EPKG_OK)
+			unlink(file);
 
 	}
 	pkg_manifest_keys_free(keys);

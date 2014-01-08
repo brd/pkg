@@ -32,9 +32,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "uthash.h"
-#include "utlist.h"
-
 /**
  * @file rcl.h
  * RCL is an rspamd configuration language, which is a form of
@@ -76,6 +73,13 @@
 #define UCL_FREE(size, ptr) free(ptr)
 #endif
 
+#if    __GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4)
+#define UCL_WARN_UNUSED_RESULT               \
+  __attribute__((warn_unused_result))
+#else
+#define UCL_WARN_UNUSED_RESULT
+#endif
+
 enum ucl_error {
 	UCL_EOK = 0,   //!< UCL_EOK
 	UCL_ESYNTAX,   //!< UCL_ESYNTAX
@@ -99,7 +103,8 @@ enum ucl_type {
 	UCL_STRING,    //!< UCL_STRING
 	UCL_BOOLEAN,   //!< UCL_BOOLEAN
 	UCL_TIME,      //!< UCL_TIME
-	UCL_USERDATA   //!< UCL_USERDATA
+	UCL_USERDATA,  //!< UCL_USERDATA
+	UCL_NULL       //!< UCL_NULL
 };
 
 /**
@@ -131,8 +136,9 @@ enum ucl_string_flags {
 	UCL_STRING_PARSE_DOUBLE = 0x10,    /**< UCL_STRING_PARSE_DOUBLE parse passed string and detect integer or float number */
 	UCL_STRING_PARSE_NUMBER =  UCL_STRING_PARSE_INT|UCL_STRING_PARSE_DOUBLE ,  /**<
 									UCL_STRING_PARSE_NUMBER parse passed string and detect number */
-	UCL_STRING_PARSE =  UCL_STRING_PARSE_BOOLEAN|UCL_STRING_PARSE_NUMBER   /**<
+	UCL_STRING_PARSE =  UCL_STRING_PARSE_BOOLEAN|UCL_STRING_PARSE_NUMBER,   /**<
 									UCL_STRING_PARSE parse passed string (and detect booleans and numbers) */
+	UCL_STRING_PARSE_BYTES = 0x20  /**< Treat numbers as bytes */
 };
 
 /**
@@ -152,17 +158,19 @@ typedef struct ucl_object_s {
 		int64_t iv;							/**< int value of an object */
 		const char *sv;					/**< string value of an object */
 		double dv;							/**< double value of an object */
-		struct ucl_object_s *ov;			/**< array or hash 			*/
+		struct ucl_object_s *av;			/**< array					*/
+		void *ov;							/**< object					*/
 		void* ud;							/**< opaque user data		*/
 	} value;
-	enum ucl_type type;						/**< real type				*/
-	short int ref;							/**< reference count		*/
-	short int flags;						/**< object flags			*/
-	size_t len;								/**< size of an object		*/
+	const char *key;						/**< key of an object		*/
 	struct ucl_object_s *next;				/**< array handle			*/
 	struct ucl_object_s *prev;				/**< array handle			*/
 	unsigned char* trash_stack[2];			/**< pointer to allocated chunks */
-	UT_hash_handle hh;						/**< hash handle			*/
+	unsigned keylen;						/**< lenght of a key		*/
+	unsigned len;							/**< size of an object		*/
+	enum ucl_type type;						/**< real type				*/
+	uint16_t ref;							/**< reference count		*/
+	uint16_t flags;							/**< object flags			*/
 } ucl_object_t;
 
 
@@ -184,6 +192,7 @@ char* ucl_copy_value_trash (ucl_object_t *obj);
  * Creates a new object
  * @return new object
  */
+static inline ucl_object_t* ucl_object_new (void) UCL_WARN_UNUSED_RESULT;
 static inline ucl_object_t *
 ucl_object_new (void)
 {
@@ -192,6 +201,26 @@ ucl_object_new (void)
 	if (new != NULL) {
 		memset (new, 0, sizeof (ucl_object_t));
 		new->ref = 1;
+		new->type = UCL_NULL;
+	}
+	return new;
+}
+
+/**
+ * Create new object with type specified
+ * @param type type of a new object
+ * @return new object
+ */
+static inline ucl_object_t* ucl_object_typed_new (unsigned int type) UCL_WARN_UNUSED_RESULT;
+static inline ucl_object_t *
+ucl_object_typed_new (unsigned int type)
+{
+	ucl_object_t *new;
+	new = malloc (sizeof (ucl_object_t));
+	if (new != NULL) {
+		memset (new, 0, sizeof (ucl_object_t));
+		new->ref = 1;
+		new->type = (type <= UCL_NULL ? type : UCL_NULL);
 	}
 	return new;
 }
@@ -203,7 +232,8 @@ ucl_object_new (void)
  * @param flags conversion flags
  * @return new object
  */
-ucl_object_t * ucl_object_fromstring_common (const char *str, size_t len, enum ucl_string_flags flags);
+ucl_object_t * ucl_object_fromstring_common (const char *str, size_t len,
+		enum ucl_string_flags flags) UCL_WARN_UNUSED_RESULT;
 
 /**
  * Create a UCL object from the specified string
@@ -295,7 +325,20 @@ ucl_object_frombool (bool bv)
  * @return new value of top object
  */
 ucl_object_t* ucl_object_insert_key (ucl_object_t *top, ucl_object_t *elt,
-		const char *key, size_t keylen, bool copy_key);
+		const char *key, size_t keylen, bool copy_key) UCL_WARN_UNUSED_RESULT;
+
+/**
+ * Insert a object 'elt' to the hash 'top' and associate it with key 'key', if the specified key exist,
+ * try to merge its content
+ * @param top destination object (will be created automatically if top is NULL)
+ * @param elt element to insert (must NOT be NULL)
+ * @param key key to associate with this object (either const or preallocated)
+ * @param keylen length of the key (or 0 for NULL terminated keys)
+ * @param copy_key make an internal copy of key
+ * @return new value of top object
+ */
+ucl_object_t* ucl_object_insert_key_merged (ucl_object_t *top, ucl_object_t *elt,
+		const char *key, size_t keylen, bool copy_key) UCL_WARN_UNUSED_RESULT;
 
 /**
  * Append an element to the array object
@@ -303,9 +346,13 @@ ucl_object_t* ucl_object_insert_key (ucl_object_t *top, ucl_object_t *elt,
  * @param eltelement to append (must NOT be NULL)
  * @return new value of top object
  */
+static inline ucl_object_t * ucl_array_append (ucl_object_t *top,
+		ucl_object_t *elt) UCL_WARN_UNUSED_RESULT;
 static inline ucl_object_t *
 ucl_array_append (ucl_object_t *top, ucl_object_t *elt)
 {
+	ucl_object_t *head;
+
 	if (elt == NULL) {
 		return NULL;
 	}
@@ -313,9 +360,17 @@ ucl_array_append (ucl_object_t *top, ucl_object_t *elt)
 	if (top == NULL) {
 		top = ucl_object_new ();
 		top->type = UCL_ARRAY;
+		top->value.av = elt;
+		elt->next = NULL;
+		elt->prev = elt;
 	}
-
-	DL_APPEND (top->value.ov, elt);
+	else {
+		head = top->value.av;
+		elt->prev = head->prev;
+		head->prev->next = elt;
+		head->prev = elt;
+		elt->next = NULL;
+	}
 
 	return top;
 }
@@ -326,10 +381,24 @@ ucl_array_append (ucl_object_t *top, ucl_object_t *elt)
  * @param elt new element
  * @return new head if applicable
  */
+static inline ucl_object_t * ucl_elt_append (ucl_object_t *head,
+		ucl_object_t *elt) UCL_WARN_UNUSED_RESULT;
 static inline ucl_object_t *
 ucl_elt_append (ucl_object_t *head, ucl_object_t *elt)
 {
-	DL_APPEND (head, elt);
+
+	if (head == NULL) {
+		elt->next = NULL;
+		elt->prev = elt;
+		head = elt;
+	}
+	else {
+		elt->prev = head->prev;
+		head->prev->next = elt;
+		head->prev = elt;
+		elt->next = NULL;
+	}
+
 	return head;
 }
 
@@ -496,7 +565,7 @@ ucl_obj_tostring (ucl_object_t *obj)
  * @return string value
  */
 static inline const char *
-ucl_obj_tostring_forced (ucl_object_t *obj)
+ucl_object_tostring_forced (ucl_object_t *obj)
 {
 	return ucl_copy_value_trash (obj);
 }
@@ -547,21 +616,7 @@ ucl_obj_tolstring (ucl_object_t *obj, size_t *tlen)
  * @param key key to search
  * @return object matched the specified key or NULL if key is not found
  */
-static inline ucl_object_t *
-ucl_obj_get_key (ucl_object_t *obj, const char *key)
-{
-	size_t keylen;
-	ucl_object_t *ret;
-
-	if (obj == NULL || obj->type != UCL_OBJECT || key == NULL) {
-		return NULL;
-	}
-
-	keylen = strlen (key);
-	HASH_FIND (hh, obj->value.ov, key, keylen, ret);
-
-	return ret;
-}
+ucl_object_t * ucl_obj_get_key (ucl_object_t *obj, const char *key);
 
 /**
  * Return object identified by a fixed size key in the specified object
@@ -570,19 +625,7 @@ ucl_obj_get_key (ucl_object_t *obj, const char *key)
  * @param klen length of a key
  * @return object matched the specified key or NULL if key is not found
  */
-static inline ucl_object_t *
-ucl_obj_get_keyl (ucl_object_t *obj, const char *key, size_t klen)
-{
-	ucl_object_t *ret;
-
-	if (obj == NULL || obj->type != UCL_OBJECT || key == NULL) {
-		return NULL;
-	}
-
-	HASH_FIND (hh, obj->value.ov, key, klen, ret);
-
-	return ret;
-}
+ucl_object_t *ucl_obj_get_keyl (ucl_object_t *obj, const char *key, size_t klen);
 
 /**
  * Returns a key of an object as a NULL terminated string
@@ -604,8 +647,8 @@ ucl_object_key (ucl_object_t *obj)
 static inline const char *
 ucl_object_keyl (ucl_object_t *obj, size_t *len)
 {
-	*len = obj->hh.keylen;
-	return obj->hh.key;
+	*len = obj->keylen;
+	return obj->key;
 }
 
 /**
@@ -637,6 +680,15 @@ struct ucl_parser* ucl_parser_new (int flags);
  */
 void ucl_parser_register_macro (struct ucl_parser *parser, const char *macro,
 		ucl_macro_handler handler, void* ud);
+
+/**
+ * Register new parser variable
+ * @param parser parser object
+ * @param var variable name
+ * @param value variable value
+ */
+void ucl_parser_register_variable (struct ucl_parser *parser, const char *var,
+		const char *value);
 
 /**
  * Load new chunk to a parser
@@ -721,5 +773,27 @@ unsigned char *ucl_object_emit (ucl_object_t *obj, enum ucl_emitter emit_type);
  * @return true if a key has been successfully added
  */
 bool ucl_pubkey_add (struct ucl_parser *parser, const unsigned char *key, size_t len);
+
+/**
+ * Set FILENAME and CURDIR variables in parser
+ * @param parser parser object
+ * @param filename filename to set or NULL to set FILENAME to "undef" and CURDIR to getcwd()
+ * @param need_expand perform realpath() if this variable is true and filename is not NULL
+ * @return true if variables has been set
+ */
+bool ucl_parser_set_filevars (struct ucl_parser *parser, const char *filename,
+		bool need_expand);
+
+typedef void* ucl_object_iter_t;
+
+/**
+ * Get next key from an object
+ * @param obj object to iterate
+ * @param iter opaque iterator, must be set to NULL on the first call:
+ * ucl_object_iter_t it = NULL;
+ * while ((cur = ucl_iterate_object (obj, &it)) != NULL) ...
+ * @return the next object or NULL
+ */
+ucl_object_t* ucl_iterate_object (ucl_object_t *obj, ucl_object_iter_t *iter, bool expand_values);
 
 #endif /* RCL_H_ */

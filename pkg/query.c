@@ -33,7 +33,6 @@
 #include <ctype.h>
 #include <err.h>
 #include <inttypes.h>
-#include <libutil.h>
 #include <pkg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,6 +67,7 @@ static struct query_flags accepted_query_flags[] = {
 	{ 'e', "",		0, PKG_LOAD_BASIC },
 	{ 'w', "",		0, PKG_LOAD_BASIC },
 	{ 'l', "",		0, PKG_LOAD_BASIC },
+	{ 'q', "",		0, PKG_LOAD_BASIC },
 	{ 'a', "",		0, PKG_LOAD_BASIC },
 	{ 'k', "",		0, PKG_LOAD_BASIC },
 	{ 'M', "",		0, PKG_LOAD_BASIC },
@@ -212,6 +212,9 @@ format_str(struct pkg *pkg, struct sbuf *dest, const char *qstr, void *data)
 					pkg_sbuf_printf(dest, "%#A", pkg);
 					break;
 				}
+				break;
+			case 'q':
+				pkg_sbuf_printf(dest, "%q", pkg);
 				break;
 			case 'l':
 				pkg_sbuf_printf(dest, "%l", pkg);
@@ -476,6 +479,10 @@ format_sql_condition(const char *str, struct sbuf *sqlcond, bool for_remote)
 					sbuf_cat(sqlcond, "automatic");
 					state = OPERATOR_INT;
 					break;
+				case 'q':
+					sbuf_cat(sqlcond, "arch");
+					state = OPERATOR_STRING;
+					break;
 				case 'k':
 					if (for_remote)
 						goto bad_option;
@@ -501,7 +508,7 @@ format_sql_condition(const char *str, struct sbuf *sqlcond, bool for_remote)
 				case '#': /* FALLTHROUGH */
 				case '?':
 					str++;
-					const char *dbstr = for_remote ? "%1$s." : "";
+					const char *dbstr = for_remote ? "'%1$s'." : "";
 					const char *sqlop = (str[0] == '#' ? "COUNT(*)" : "COUNT(*) > 0");
 					switch (str[0]) {
 						case 'd':
