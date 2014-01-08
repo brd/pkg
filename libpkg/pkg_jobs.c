@@ -510,16 +510,14 @@ jobs_solve_autoremove(struct pkg_jobs *j)
 
 	while (pkgdb_it_next(it, &pkg, PKG_LOAD_BASIC|PKG_LOAD_RDEPS) == EPKG_OK) {
 		// Check if the pkg is locked
-		// XXX: Need to test and verify this path
-		printf("jobs_solve_autoremove() lock check\n");
 		if(pkg_is_locked(pkg)) {
 			pkg_emit_locked(pkg);
-			return(EPKG_LOCKED);
 		}
-
-		pkg_get(pkg, PKG_ORIGIN, &origin);
-		pkg_jobs_add_req(j, origin, pkg, false);
-		pkg_jobs_add_universe(j, pkg, false);
+		else {
+			pkg_get(pkg, PKG_ORIGIN, &origin);
+			pkg_jobs_add_req(j, origin, pkg, false);
+			pkg_jobs_add_universe(j, pkg, false);
+		}
 		pkg = NULL;
 	}
 	pkgdb_it_free(it);
