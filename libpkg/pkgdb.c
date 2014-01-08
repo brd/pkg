@@ -1054,6 +1054,7 @@ pkgdb_access(unsigned mode, unsigned database)
 int
 pkgdb_open(struct pkgdb **db_p, pkgdb_t type)
 {
+	printf("pkgdb_open()\n");
 	struct pkgdb	*db = NULL;
 	struct statfs	 stfs;
 	bool		 reopen = false;
@@ -1179,6 +1180,7 @@ pkgdb_open(struct pkgdb **db_p, pkgdb_t type)
 void
 pkgdb_close(struct pkgdb *db)
 {
+	printf("pkgdb_close()\n");
 	if (db == NULL)
 		return;
 

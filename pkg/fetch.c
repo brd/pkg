@@ -148,26 +148,26 @@ exec_fetch(int argc, char **argv)
 	if (auto_update && (retcode = pkgcli_update(false)) != EPKG_OK)
 		return (retcode);
 
-	if (pkgdb_open(&db, PKGDB_REMOTE) != EPKG_OK)
-		return (EX_IOERR);
+	if (pkgdb_open(&db, PKGDB_REMOTE) != EPKG_OK) {
+		printf("pkgdb_open\n"); return (EX_IOERR); }
 
-	if (pkg_jobs_new(&jobs, PKG_JOBS_FETCH, db) != EPKG_OK)
-		goto cleanup;
+	if (pkg_jobs_new(&jobs, PKG_JOBS_FETCH, db) != EPKG_OK) {
+		printf("pkg_jobs_new\n"); goto cleanup; }
 
-	if (reponame != NULL && pkg_jobs_set_repository(jobs, reponame) != EPKG_OK)
-		goto cleanup;
+	if (reponame != NULL && pkg_jobs_set_repository(jobs, reponame) != EPKG_OK) {
+		printf("pkg_jobs_set_repository\n"); goto cleanup; }
 
 	pkg_jobs_set_flags(jobs, f);
 
 	if (!upgrades_for_installed &&
-	    pkg_jobs_add(jobs, match, argv, argc) != EPKG_OK)
-		goto cleanup;
+	    pkg_jobs_add(jobs, match, argv, argc) != EPKG_OK) {
+		printf("pkg_jobs_add\n"); goto cleanup; }
 
-	if (pkg_jobs_solve(jobs) != EPKG_OK)
-		goto cleanup;
+	if (pkg_jobs_solve(jobs) != EPKG_OK) {
+		printf("pkg_jobs_solve\n"); goto cleanup; }
 
-	if (pkg_jobs_count(jobs) == 0)
-		goto cleanup;
+	if (pkg_jobs_count(jobs) == 0) {
+		printf("pkg_jobs_count\n"); goto cleanup;}
 
 	if (!quiet) {
 		print_jobs_summary(jobs, "The following packages will be fetched:\n\n");
@@ -175,14 +175,19 @@ exec_fetch(int argc, char **argv)
 		if (!yes)
 			yes = query_yesno("\nProceed with fetching packages [y/N]: ");
 	}
-	
-	if (!yes || pkg_jobs_apply(jobs) != EPKG_OK)
-		goto cleanup;
+
+	if (!yes || pkg_jobs_apply(jobs) != EPKG_OK) {
+		printf("pkg_jobs_apply\n"); goto cleanup; }
 
 	retcode = EX_OK;
 
 cleanup:
+	printf("calling pkg_jobs_free\n");
 	pkg_jobs_free(jobs);
+	if(db->sqlite != NULL) {
+		printf("db is defined\n");
+	}
+	printf("calling pkgdb_close\n");
 	pkgdb_close(db);
 
 	return (retcode);
