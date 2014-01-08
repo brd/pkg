@@ -481,13 +481,13 @@ jobs_solve_deinstall(struct pkg_jobs *j)
 			// Check if the pkg is locked
 			if(pkg_is_locked(pkg)) {
 				pkg_emit_locked(pkg);
-				return(EPKG_FATAL);
 			}
-
-			pkg_get(pkg, PKG_ORIGIN, &origin, PKG_FLATSIZE, &oldsize);
-			pkg_set(pkg, PKG_OLD_FLATSIZE, oldsize, PKG_FLATSIZE, (int64_t)0);
-			pkg_jobs_add_req(j, origin, pkg, false);
-			pkg_jobs_add_universe(j, pkg, recursive);
+			else {
+				pkg_get(pkg, PKG_ORIGIN, &origin, PKG_FLATSIZE, &oldsize);
+				pkg_set(pkg, PKG_OLD_FLATSIZE, oldsize, PKG_FLATSIZE, (int64_t)0);
+				pkg_jobs_add_req(j, origin, pkg, false);
+				pkg_jobs_add_universe(j, pkg, recursive);
+			}
 			pkg = NULL;
 		}
 		pkgdb_it_free(it);
