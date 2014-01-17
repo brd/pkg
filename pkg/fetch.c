@@ -184,9 +184,6 @@ exec_fetch(int argc, char **argv)
 cleanup:
 	printf("calling pkg_jobs_free\n");
 	pkg_jobs_free(jobs);
-	if(db->sqlite != NULL) {
-		printf("db is defined\n");
-	}
 	printf("calling pkgdb_close\n");
 	pkgdb_close(db);
 
