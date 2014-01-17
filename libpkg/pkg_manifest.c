@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2011-2013 Baptiste Daroussin <bapt@FreeBSD.org>
+ * Copyright (c) 2011-2014 Baptiste Daroussin <bapt@FreeBSD.org>
  * Copyright (c) 2011-2012 Julien Laffaye <jlaffaye@FreeBSD.org>
  * All rights reserved.
  * 
@@ -290,7 +290,10 @@ pkg_string(struct pkg *pkg, ucl_object_t *obj, int attr)
 		}
 		break;
 	default:
-		ret = urldecode(str, &pkg->fields[attr]);
+		if (attr == PKG_DESC)
+			ret = urldecode(str, &pkg->fields[attr]);
+		else
+			ret = pkg_set(pkg, attr, str);
 		break;
 	}
 
@@ -654,12 +657,12 @@ parse_manifest(struct pkg *pkg, struct pkg_manifest_key *keys, ucl_object_t *obj
 		key = ucl_object_key(cur);
 		if (key == NULL)
 			continue;
-		pkg_debug(2, "Manifest: found key: '%s'", key);
+		pkg_debug(3, "Manifest: found key: '%s'", key);
 		HASH_FIND_STR(keys, key, selected_key);
 		if (selected_key != NULL) {
 			HASH_FIND_UCLT(selected_key->parser, &cur->type, dp);
 			if (dp != NULL) {
-				pkg_debug(2, "Manifest: key is valid");
+				pkg_debug(3, "Manifest: key is valid");
 				dp->parse_data(pkg, cur, selected_key->type);
 			}
 		}
@@ -804,7 +807,6 @@ pkg_emit_filelist(struct pkg *pkg, FILE *f)
 {
 	ucl_object_t *obj = NULL, *seq;
 	struct pkg_file *file = NULL;
-	char *output;
 	const char *name, *origin, *version;
 	struct sbuf *b = NULL;
 
@@ -821,9 +823,7 @@ pkg_emit_filelist(struct pkg *pkg, FILE *f)
 	if (seq != NULL)
 		obj = ucl_object_insert_key(obj, seq, "files", 5, false);
 
-	output = ucl_object_emit(obj, UCL_EMIT_JSON_COMPACT);
-	fprintf(f, "%s", output);
-	free(output);
+	ucl_object_emit_file(obj, UCL_EMIT_JSON_COMPACT, f);
 
 	if (b != NULL)
 		sbuf_delete(b);
@@ -834,7 +834,7 @@ pkg_emit_filelist(struct pkg *pkg, FILE *f)
 }
 
 static int
-emit_manifest(struct pkg *pkg, char **out, short flags)
+emit_manifest(struct pkg *pkg, struct sbuf **out, short flags)
 {
 	struct pkg_dep		*dep      = NULL;
 	struct pkg_option	*option   = NULL;
@@ -1062,9 +1062,9 @@ emit_manifest(struct pkg *pkg, char **out, short flags)
 	}
 
 	if ((flags & PKG_MANIFEST_EMIT_PRETTY) == PKG_MANIFEST_EMIT_PRETTY)
-		*out = ucl_object_emit(top, UCL_EMIT_YAML);
+		ucl_object_emit_sbuf(top, UCL_EMIT_YAML, out);
 	else
-		*out = ucl_object_emit(top, UCL_EMIT_JSON_COMPACT);
+		ucl_object_emit_sbuf(top, UCL_EMIT_JSON_COMPACT, out);
 
 	ucl_object_free(top);
 
@@ -1094,7 +1094,7 @@ static int
 pkg_emit_manifest_generic(struct pkg *pkg, void *out, short flags,
 	    char **pdigest, bool out_is_a_sbuf)
 {
-	char *output;
+	struct sbuf *output = NULL;
 	unsigned char digest[SHA256_DIGEST_LENGTH];
 	SHA256_CTX *sign_ctx = NULL;
 	int rc;
@@ -1105,15 +1105,16 @@ pkg_emit_manifest_generic(struct pkg *pkg, void *out, short flags,
 		SHA256_Init(sign_ctx);
 	}
 
+	if (out_is_a_sbuf)
+		output = out;
+
 	rc = emit_manifest(pkg, &output, flags);
 
 	if (sign_ctx != NULL)
-		SHA256_Update(sign_ctx, output, strlen(output));
+		SHA256_Update(sign_ctx, sbuf_data(output), sbuf_len(output));
 
-	if (out_is_a_sbuf)
-		sbuf_cat(out, output);
-	else
-		fprintf(out, "%s\n", output);
+	if (!out_is_a_sbuf)
+		fprintf(out, "%s\n", sbuf_data(output));
 
 	if (pdigest != NULL) {
 		SHA256_Final(digest, sign_ctx);
@@ -1121,7 +1122,8 @@ pkg_emit_manifest_generic(struct pkg *pkg, void *out, short flags,
 		free(sign_ctx);
 	}
 
-	free (output);
+	if (!out_is_a_sbuf)
+		sbuf_free(output);
 
 	return (rc);
 }

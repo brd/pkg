@@ -3,6 +3,7 @@
  * Copyright (c) 2011-2012 Julien Laffaye <jlaffaye@FreeBSD.org>
  * Copyright (c) 2011-2012 Marin Atanasov Nikolov <dnaeon@gmail.com>
  * Copyright (c) 2012-2013 Matthew Seaman <matthew@FreeBSD.org>
+ * Copyright (c) 2013-2014 Vsevolod Stakhov <vsevolod@FreeBSD.org>
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -625,7 +626,7 @@ print_jobs_summary_pkg(struct pkg *pkg, pkg_jobs_t type, int64_t *oldsize,
 		*oldsize += oldflatsize;
 		*newsize += flatsize;
 
-		pkg_printf("\t%n-%v\n", pkg, pkg);
+		pkg_printf("\tRemoving %n-%v\n", pkg, pkg);
 		break;
 	case PKG_JOBS_FETCH:
 		*dlsize += pkgsize;
@@ -647,10 +648,11 @@ print_jobs_summary_pkg(struct pkg *pkg, pkg_jobs_t type, int64_t *oldsize,
 void
 print_jobs_summary(struct pkg_jobs *jobs, const char *msg, ...)
 {
-	struct pkg *pkg = NULL;
+	struct pkg *pkg;
+	void *iter = NULL;
 	char size[7];
 	va_list ap;
-	pkg_jobs_t type;
+	pkg_jobs_t type, inv_type = PKG_JOBS_DEINSTALL;
 	int64_t dlsize, oldsize, newsize;
 
 	dlsize = oldsize = newsize = 0;
@@ -660,15 +662,18 @@ print_jobs_summary(struct pkg_jobs *jobs, const char *msg, ...)
 	vprintf(msg, ap);
 	va_end(ap);
 
-	while (pkg_jobs_add_iter(jobs, &pkg) == EPKG_OK) {
+	while ((pkg = pkg_jobs_add_iter(jobs, &iter))) {
 		print_jobs_summary_pkg(pkg, type, &oldsize, &newsize, &dlsize);
 	}
 
-	pkg = NULL;
-	while (pkg_jobs_delete_iter(jobs, &pkg) == EPKG_OK) {
-		print_jobs_summary_pkg(pkg, type, &oldsize, &newsize, &dlsize);
+	iter = NULL;
+	while ((pkg = pkg_jobs_delete_iter(jobs, &iter))) {
+		print_jobs_summary_pkg(pkg, inv_type, &oldsize, &newsize, &dlsize);
 	}
-
+	iter = NULL;
+	while ((pkg = pkg_jobs_upgrade_iter(jobs, &iter))) {
+		print_jobs_summary_pkg(pkg, inv_type, &oldsize, &newsize, &dlsize);
+	}
 
 	if (oldsize > newsize) {
 		humanize_number(size, sizeof(size), oldsize - newsize, "B", HN_AUTOSCALE, 0);
