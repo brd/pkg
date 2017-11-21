@@ -408,6 +408,22 @@ create_from_plist_hash_body() {
 		-e empty \
 		-s exit:0 \
 		ls test-1-*.txz
+
+	SHORTHASH=`ls test-1-*.txz`
+
+#echo brd
+#echo ${SHORTHASH}
+#ls -l test-1.txz | grep ${SHORTHASH}
+#echo $?
+#echo brd
+
+	atf_check \
+		-o ignore \
+		-e ignore \
+		-s ignore \
+		ls -l test-1.txz | grep ${SHORTHASH}
+echo $?
+return 0
 }
 
 create_from_plist_with_keyword_and_message_body() {
